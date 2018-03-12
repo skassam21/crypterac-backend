@@ -6,24 +6,23 @@ import org.bouncycastle.util.encoders.Hex;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.web3j.crypto.*;
+import org.web3j.crypto.Hash;
+import org.web3j.crypto.Sign;
+import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.RawTransaction;
-import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.http.HttpService;
-import org.web3j.rlp.RlpEncoder;
 import org.web3j.tx.Transfer;
 import org.web3j.utils.Convert;
 import org.web3j.utils.Numeric;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Base64;
-import java.math.BigInteger;
 
 @RestController
 public class ReceiveTransactionController
@@ -36,7 +35,7 @@ public class ReceiveTransactionController
     private static class ReceiveTransactionRequest
     {
 
-        private final String toAddress;
+        private final String fromAddress;
         private final String amount;
     }
 
@@ -73,7 +72,7 @@ public class ReceiveTransactionController
         try {
             BigInteger gasPrice = web3j.ethGasPrice().send().getGasPrice();
             BigInteger weiValue = Convert.toWei(receiveTransaction.getAmount(), Convert.Unit.FINNEY).toBigIntegerExact();
-            BigInteger nonce = web3j.ethGetTransactionCount(receiveTransaction.getToAddress(),
+            BigInteger nonce = web3j.ethGetTransactionCount(receiveTransaction.getFromAddress(),
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
             RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
                     nonce,
@@ -103,7 +102,7 @@ public class ReceiveTransactionController
     private static class CompleteTransactionRequest
     {
 
-            private final String respData;
+        private final String respData;
         private final String message;
         private final TransactionDetails transactionDetails;
     }
@@ -138,16 +137,18 @@ public class ReceiveTransactionController
             encode.setAccessible(true);
             byte[] signedMessage = (byte[]) encode.invoke(null, rawTransaction, signature);
             String hexValue = "0x" + Hex.toHexString(signedMessage);
-            EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
-
-            if (ethSendTransaction.hasError()) {
-                System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-                return new ResponseEntity(HttpStatus.BAD_REQUEST);
-            } else {
-                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
-                        Wallet.getPublicAddress(), hexValue));
-                return new ResponseEntity(HttpStatus.OK);
-            }
+            System.out.println(hexValue);
+            return new ResponseEntity(HttpStatus.OK);
+//            EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
+//
+//            if (ethSendTransaction.hasError()) {
+//                System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
+//                return new ResponseEntity(HttpStatus.BAD_REQUEST);
+//            } else {
+//                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
+//                        Wallet.getPublicAddress(), hexValue));
+//                return new ResponseEntity(HttpStatus.OK);
+//            }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
         }
