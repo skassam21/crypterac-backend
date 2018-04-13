@@ -7,8 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.web3j.crypto.Credentials;
-import org.web3j.crypto.Hash;
-import org.web3j.crypto.Sign;
+import org.web3j.crypto.Keys;
 import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -17,9 +16,10 @@ import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.http.HttpService;
 import org.web3j.tx.Transfer;
 import org.web3j.utils.Convert;
+import org.web3j.utils.Numeric;
 
-import java.lang.reflect.Method;
 import java.math.BigInteger;
+import java.util.Arrays;
 import java.util.Base64;
 
 @RestController
@@ -33,7 +33,6 @@ public class SendTransactionController
     @AllArgsConstructor
     private static class SendTransactionRequest
     {
-
         private final String toAddress;
         private final String amount;
     }
@@ -55,11 +54,12 @@ public class SendTransactionController
             BigInteger weiValue = Convert.toWei(request.getAmount(), Convert.Unit.FINNEY).toBigIntegerExact();
             BigInteger nonce = web3j.ethGetTransactionCount(Wallet.getPublicAddress(),
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
+            String toAddress = convertECPublicKeyToAddress(Base64.getDecoder().decode(request.getToAddress()));
             RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
                     nonce,
                     gasPrice,
                     Transfer.GAS_LIMIT,
-                    request.getToAddress(),
+                    toAddress,
                     weiValue);
             Credentials credentials = Credentials.create(Wallet.getPrivateKey());
 
@@ -80,5 +80,16 @@ public class SendTransactionController
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
         }
+    }
+
+    public static String convertECPublicKeyToAddress(byte[] data) {
+
+        return Numeric.prependHexPrefix(Keys.getAddress(convertECPublicKeyToBigInteger(data)));
+    }
+
+    public static BigInteger convertECPublicKeyToBigInteger(byte[] data) {
+        byte[] newArray = Arrays.copyOfRange(data, 0, data.length);
+        newArray[0] = 0x00;
+        return new BigInteger(newArray);
     }
 }

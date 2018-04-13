@@ -7,11 +7,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.web3j.crypto.Hash;
+import org.web3j.crypto.Keys;
 import org.web3j.crypto.Sign;
 import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.RawTransaction;
+import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.http.HttpService;
 import org.web3j.tx.Transfer;
 import org.web3j.utils.Convert;
@@ -72,7 +74,11 @@ public class ReceiveTransactionController
         try {
             BigInteger gasPrice = web3j.ethGasPrice().send().getGasPrice();
             BigInteger weiValue = Convert.toWei(receiveTransaction.getAmount(), Convert.Unit.FINNEY).toBigIntegerExact();
-            BigInteger nonce = web3j.ethGetTransactionCount(receiveTransaction.getFromAddress(),
+            String fromAddress = convertECPublicKeyToAddress(Base64.getDecoder().decode(receiveTransaction.getFromAddress()));
+
+            System.out.println("fromAddress " + fromAddress);
+
+            BigInteger nonce = web3j.ethGetTransactionCount(fromAddress,
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
             RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
                     nonce,
@@ -104,7 +110,16 @@ public class ReceiveTransactionController
 
         private final String respData;
         private final String message;
+        private final String fromAddress;
         private final TransactionDetails transactionDetails;
+    }
+
+    @Data
+    @AllArgsConstructor
+    private static class CompleteTransactionResponse
+    {
+
+        private final boolean success;
     }
 
     /***
@@ -116,7 +131,7 @@ public class ReceiveTransactionController
      */
     @RequestMapping("/transactions/receive/complete")
     public @ResponseBody
-    ResponseEntity complete_receive_transaction(@RequestBody CompleteTransactionRequest request)
+    CompleteTransactionResponse complete_receive_transaction(@RequestBody CompleteTransactionRequest request)
             throws ErrorController.TransactionException
     {
         byte[] respData = Base64.getDecoder().decode(request.getRespData());
@@ -131,30 +146,32 @@ public class ReceiveTransactionController
 
 
         try {
-            Sign.SignatureData signature = createSignature(respData, messageHash);
+            Sign.SignatureData signature = createSignature(respData, messageHash,
+                    Base64.getDecoder().decode(request.getFromAddress()));
             Method encode = TransactionEncoder.class.getDeclaredMethod("encode", RawTransaction.class,
                     Sign.SignatureData.class);
             encode.setAccessible(true);
             byte[] signedMessage = (byte[]) encode.invoke(null, rawTransaction, signature);
             String hexValue = "0x" + Hex.toHexString(signedMessage);
             System.out.println(hexValue);
-            return new ResponseEntity(HttpStatus.OK);
-//            EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
-//
-//            if (ethSendTransaction.hasError()) {
-//                System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-//                return new ResponseEntity(HttpStatus.BAD_REQUEST);
-//            } else {
-//                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
-//                        Wallet.getPublicAddress(), hexValue));
-//                return new ResponseEntity(HttpStatus.OK);
-//            }
+//            return new ResponseEntity(HttpStatus.OK);
+            EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
+
+            if (ethSendTransaction.hasError()) {
+                System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
+
+                return new CompleteTransactionResponse(false);
+            } else {
+                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
+                        Wallet.getPublicAddress(), hexValue));
+                return new CompleteTransactionResponse(true);
+            }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
         }
     }
 
-    private Sign.SignatureData createSignature(byte[] respData, byte[] messageHash)
+    private Sign.SignatureData createSignature(byte[] respData, byte[] messageHash, byte[] pubData)
             throws Exception
     {
         byte[] rawSig = extractSignature(respData);
@@ -178,8 +195,6 @@ public class ReceiveTransactionController
 
         Method recoverFromSignature = Sign.class.getDeclaredMethod("recoverFromSignature", int.class, ecdsaSignature, byte[].class);
         recoverFromSignature.setAccessible(true);
-
-        byte[] pubData = extractPublicKeyFromSignature(respData);
 
         BigInteger publicKey = convertECPublicKeyToBigInteger(pubData);
 
@@ -214,12 +229,13 @@ public class ReceiveTransactionController
 
     private byte[] extractSignature(byte[] sig)
     {
-        int off = sig[4] + 5;
+        int off = 0;
         return Arrays.copyOfRange(sig, off, off + sig[off + 1] + 2);
     }
 
-    private byte[] extractPublicKeyFromSignature(byte[] sig) {
-        return Arrays.copyOfRange(sig, 5, 5 + sig[4]);
+    private static String convertECPublicKeyToAddress(byte[] data) {
+
+        return Numeric.prependHexPrefix(Keys.getAddress(convertECPublicKeyToBigInteger(data)));
     }
 
     private static BigInteger convertECPublicKeyToBigInteger(byte[] data) {
