@@ -6,6 +6,12 @@ import org.bouncycastle.util.encoders.Hex;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
+import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Keys;
 import org.web3j.crypto.TransactionEncoder;
@@ -21,13 +27,67 @@ import org.web3j.utils.Numeric;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 
 @RestController
 public class SendTransactionController
 {
 
     private static final Web3j web3j = Web3j.build(new HttpService("https://ropsten.infura.io/uB6E6lwaacbBdi7rVDy7"));
+    private static final String CRYPTERAC_CONTRACT = "0x924c5735570a371962051ea15b6d9e37eb6f5af4";
 
+    private static final String CRYPTERAC_TYPE = "CRTC";
+    private static final String ETHER_TYPE = "ETH";
+
+    /**
+     * Approve Crypto to be sent between to parties
+     *
+     * @return success or error messages
+     */
+    @RequestMapping(method= RequestMethod.POST, value="/transactions/approve")
+    public @ResponseBody
+    SendTransactionResponse approve_transaction()
+            throws ErrorController.TransactionException {
+
+        try {
+            BigInteger gasPrice = web3j.ethGasPrice().send().getGasPrice();
+            System.out.println("gasPrice " + gasPrice);
+            BigInteger nonce = web3j.ethGetTransactionCount(Wallet.getPublicAddress(),
+                    DefaultBlockParameterName.LATEST).send().getTransactionCount();
+            RawTransaction rawTransaction;
+
+            Function function = new Function("approve",
+                    Arrays.<Type>asList(new Address("0x041ffaab716df567a31fb9673d0645d08eb7e6c1"),
+                            new Uint256(new BigInteger("1000000"))),
+                    Collections.<TypeReference<?>>emptyList());
+            String encodedFunction = FunctionEncoder.encode(function);
+
+            rawTransaction = RawTransaction.createTransaction(
+                    nonce,
+                    gasPrice, new BigInteger("50000"),
+                    CRYPTERAC_CONTRACT,
+                    encodedFunction);
+
+            Credentials credentials = Credentials.create(Wallet.getPrivateKey());
+
+            System.out.println("nonce " + nonce);
+
+            byte[] signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials);
+            String hexValue = "0x" + Hex.toHexString(signedMessage);
+            EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
+
+            if (ethSendTransaction.hasError()) {
+                System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
+                return new SendTransactionResponse(false);
+            } else {
+                System.out.println(String.format("Approved %s, with tx_id = %s",
+                        CRYPTERAC_CONTRACT, hexValue));
+                return new SendTransactionResponse(true);
+            }
+        } catch (Exception e) {
+            throw new ErrorController.TransactionException(e.getMessage());
+        }
+    }
 
     @Data
     @AllArgsConstructor
@@ -60,16 +120,32 @@ public class SendTransactionController
 
         try {
             BigInteger gasPrice = web3j.ethGasPrice().send().getGasPrice();
+            System.out.println("gasPrice " + gasPrice);
             BigInteger weiValue = Convert.toWei(request.getAmount(), Convert.Unit.FINNEY).toBigIntegerExact();
             BigInteger nonce = web3j.ethGetTransactionCount(Wallet.getPublicAddress(),
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
             String toAddress = convertECPublicKeyToAddress(Base64.getDecoder().decode(request.getToAddress()));
-            RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
-                    nonce,
-                    gasPrice,
-                    Transfer.GAS_LIMIT,
-                    toAddress,
-                    weiValue);
+            RawTransaction rawTransaction;
+            if (request.getType().equals(CRYPTERAC_TYPE)) {
+                Function function = new Function("transfer",
+                        Arrays.<Type>asList(new Address(toAddress),
+                                new Uint256(new BigInteger(request.getAmount()))),
+                        Collections.<TypeReference<?>>emptyList());
+                String encodedFunction = FunctionEncoder.encode(function);
+
+                rawTransaction = RawTransaction.createTransaction(
+                        nonce,
+                        gasPrice, new BigInteger("250000"),
+                        CRYPTERAC_CONTRACT,
+                        encodedFunction);
+            } else {
+                rawTransaction = RawTransaction.createEtherTransaction(
+                        nonce,
+                        gasPrice,
+                        Transfer.GAS_LIMIT,
+                        toAddress,
+                        weiValue);
+            }
             Credentials credentials = Credentials.create(Wallet.getPrivateKey());
 
             System.out.println("nonce " + nonce);
@@ -82,8 +158,8 @@ public class SendTransactionController
                 System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
                 return new SendTransactionResponse(false);
             } else {
-                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
-                        Wallet.getPublicAddress(), hexValue));
+                System.out.println(String.format("Sent Token to %s, with tx_id = %s",
+                        toAddress, hexValue));
                 return new SendTransactionResponse(true);
             }
         } catch (Exception e) {

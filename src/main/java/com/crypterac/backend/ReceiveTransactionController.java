@@ -6,6 +6,12 @@ import org.bouncycastle.util.encoders.Hex;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
+import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.Keys;
 import org.web3j.crypto.Sign;
@@ -13,6 +19,7 @@ import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.RawTransaction;
+import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.http.HttpService;
 import org.web3j.tx.Transfer;
@@ -22,19 +29,21 @@ import org.web3j.utils.Numeric;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 
 @RestController
 public class ReceiveTransactionController
 {
 
     private static final Web3j web3j = Web3j.build(new HttpService("https://ropsten.infura.io/uB6E6lwaacbBdi7rVDy7"));
-    private static final String KIN_CONTRACT = "0x818Fc6C2Ec5986bc6E2CBf00939d90556aB12ce5";
+    private static final String CRYPTERAC_CONTRACT = "0x924c5735570a371962051ea15b6d9e37eb6f5af4";
 
-    private static final String KIN_TYPE = "kin";
-    private static final String ETHER_TYPE = "ether";
+    private static final String CRYPTERAC_TYPE = "CRTC";
+    private static final String ETHER_TYPE = "ETH";
 
 
     @Data
@@ -87,15 +96,29 @@ public class ReceiveTransactionController
 
             BigInteger nonce = web3j.ethGetTransactionCount(fromAddress,
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
+            TransactionDetails details;
             RawTransaction rawTransaction;
-
-            if (receiveTransaction.getType().equals(KIN_TYPE)) {
-                rawTransaction = RawTransaction.createEtherTransaction(
+            if (receiveTransaction.getType().equals(CRYPTERAC_TYPE)) {
+                Function function = new Function("transfer",
+                        Arrays.<Type>asList(new Address(Wallet.getPublicAddress()),
+                                new Uint256(new BigInteger(receiveTransaction.getAmount()))),
+                        Collections.<TypeReference<?>>emptyList());
+                String encodedFunction = FunctionEncoder.encode(function);
+                details = new TransactionDetails(
                         nonce,
                         gasPrice,
-                        Transfer.GAS_LIMIT,
+                        new BigInteger("250000"),
                         Wallet.getPublicAddress(),
-                        weiValue);
+                        new BigInteger(receiveTransaction.getAmount()),
+                        receiveTransaction.getType()
+                );
+
+                rawTransaction = RawTransaction.createTransaction(
+                        nonce,
+                        gasPrice,
+                        new BigInteger("250000"),
+                        CRYPTERAC_CONTRACT,
+                        encodedFunction);
             } else {
                 rawTransaction = RawTransaction.createEtherTransaction(
                         nonce,
@@ -103,20 +126,21 @@ public class ReceiveTransactionController
                         Transfer.GAS_LIMIT,
                         Wallet.getPublicAddress(),
                         weiValue);
+                details = new TransactionDetails(
+                        nonce,
+                        gasPrice,
+                        Transfer.GAS_LIMIT,
+                        Wallet.getPublicAddress(),
+                        weiValue,
+                        receiveTransaction.getType()
+                );
             }
 
             byte[] txBytes = TransactionEncoder.encode(rawTransaction);
             byte[] messageHash = Hash.sha3(txBytes);
             // use base64 encoding to transfer bytes
             String message = new String(Base64.getEncoder().encode(messageHash));
-            TransactionDetails details = new TransactionDetails(
-                    nonce,
-                    gasPrice,
-                    Transfer.GAS_LIMIT,
-                    Wallet.getPublicAddress(),
-                    weiValue,
-                    receiveTransaction.getType()
-            );
+
             return new ReceiveTransactionResponse(message, details);
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
@@ -156,18 +180,38 @@ public class ReceiveTransactionController
     {
         byte[] respData = Base64.getDecoder().decode(request.getRespData());
         byte[] messageHash = Base64.getDecoder().decode(request.getMessage());
-        RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
-                request.getTransactionDetails().getNonce(),
-                request.getTransactionDetails().getGasPrice(),
-                request.getTransactionDetails().getGasLimit(),
-                request.getTransactionDetails().getToAddress(),
-                request.getTransactionDetails().getValue()
-        );
+        byte[] pubData = Base64.getDecoder().decode(request.getFromAddress());
+        String fromAddress = convertECPublicKeyToAddress(pubData);
+
+        RawTransaction rawTransaction;
+        if (request.getTransactionDetails().getType().equals(CRYPTERAC_TYPE)) {
+            Function function = new Function("transfer",
+                    Arrays.<Type>asList(
+                            new Address(Wallet.getPublicAddress()),
+                            new Uint256(request.getTransactionDetails().getValue())),
+                    Collections.<TypeReference<?>>emptyList());
+            String encodedFunction = FunctionEncoder.encode(function);
+
+            rawTransaction = RawTransaction.createTransaction(
+                    request.getTransactionDetails().getNonce(),
+                    request.getTransactionDetails().getGasPrice(),
+                    request.getTransactionDetails().getGasLimit(),
+                    CRYPTERAC_CONTRACT,
+                    encodedFunction);
+        } else {
+            rawTransaction = RawTransaction.createEtherTransaction(
+                    request.getTransactionDetails().getNonce(),
+                    request.getTransactionDetails().getGasPrice(),
+                    request.getTransactionDetails().getGasLimit(),
+                    request.getTransactionDetails().getToAddress(),
+                    request.getTransactionDetails().getValue()
+            );
+        }
 
 
         try {
             Sign.SignatureData signature = createSignature(respData, messageHash,
-                    Base64.getDecoder().decode(request.getFromAddress()));
+                    pubData);
             Method encode = TransactionEncoder.class.getDeclaredMethod("encode", RawTransaction.class,
                     Sign.SignatureData.class);
             encode.setAccessible(true);
