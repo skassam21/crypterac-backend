@@ -35,6 +35,15 @@ public class SendTransactionController
     {
         private final String toAddress;
         private final String amount;
+        private final String type;
+    }
+
+    @Data
+    @AllArgsConstructor
+    private static class SendTransactionResponse
+    {
+
+        private final boolean success;
     }
 
     /**
@@ -45,7 +54,7 @@ public class SendTransactionController
      */
     @RequestMapping(method= RequestMethod.POST, value="/transactions/send")
     public @ResponseBody
-    ResponseEntity send_transaction(@RequestBody
+    SendTransactionResponse send_transaction(@RequestBody
             SendTransactionRequest request)
             throws ErrorController.TransactionException {
 
@@ -71,11 +80,11 @@ public class SendTransactionController
 
             if (ethSendTransaction.hasError()) {
                 System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-                return new ResponseEntity(HttpStatus.BAD_REQUEST);
+                return new SendTransactionResponse(false);
             } else {
                 System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
                         Wallet.getPublicAddress(), hexValue));
-                return new ResponseEntity(HttpStatus.OK);
+                return new SendTransactionResponse(true);
             }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());

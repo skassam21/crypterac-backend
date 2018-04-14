@@ -31,6 +31,11 @@ public class ReceiveTransactionController
 {
 
     private static final Web3j web3j = Web3j.build(new HttpService("https://ropsten.infura.io/uB6E6lwaacbBdi7rVDy7"));
+    private static final String KIN_CONTRACT = "0x818Fc6C2Ec5986bc6E2CBf00939d90556aB12ce5";
+
+    private static final String KIN_TYPE = "kin";
+    private static final String ETHER_TYPE = "ether";
+
 
     @Data
     @AllArgsConstructor
@@ -39,6 +44,7 @@ public class ReceiveTransactionController
 
         private final String fromAddress;
         private final String amount;
+        private final String type;
     }
 
     @Data
@@ -49,6 +55,7 @@ public class ReceiveTransactionController
         private final BigInteger gasLimit;
         private final String toAddress;
         private final BigInteger value;
+        private final String type;
     }
 
     @Data
@@ -80,12 +87,24 @@ public class ReceiveTransactionController
 
             BigInteger nonce = web3j.ethGetTransactionCount(fromAddress,
                     DefaultBlockParameterName.LATEST).send().getTransactionCount();
-            RawTransaction rawTransaction = RawTransaction.createEtherTransaction(
-                    nonce,
-                    gasPrice,
-                    Transfer.GAS_LIMIT,
-                    Wallet.getPublicAddress(),
-                    weiValue);
+            RawTransaction rawTransaction;
+
+            if (receiveTransaction.getType().equals(KIN_TYPE)) {
+                rawTransaction = RawTransaction.createEtherTransaction(
+                        nonce,
+                        gasPrice,
+                        Transfer.GAS_LIMIT,
+                        Wallet.getPublicAddress(),
+                        weiValue);
+            } else {
+                rawTransaction = RawTransaction.createEtherTransaction(
+                        nonce,
+                        gasPrice,
+                        Transfer.GAS_LIMIT,
+                        Wallet.getPublicAddress(),
+                        weiValue);
+            }
+
             byte[] txBytes = TransactionEncoder.encode(rawTransaction);
             byte[] messageHash = Hash.sha3(txBytes);
             // use base64 encoding to transfer bytes
@@ -95,7 +114,8 @@ public class ReceiveTransactionController
                     gasPrice,
                     Transfer.GAS_LIMIT,
                     Wallet.getPublicAddress(),
-                    weiValue
+                    weiValue,
+                    receiveTransaction.getType()
             );
             return new ReceiveTransactionResponse(message, details);
         } catch (Exception e) {
