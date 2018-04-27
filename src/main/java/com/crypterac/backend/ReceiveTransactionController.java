@@ -2,9 +2,14 @@ package com.crypterac.backend;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.HttpClients;
 import org.bouncycastle.util.encoders.Hex;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.springframework.web.bind.annotation.*;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.TypeReference;
@@ -19,17 +24,16 @@ import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.methods.request.RawTransaction;
-import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.http.HttpService;
 import org.web3j.tx.Transfer;
 import org.web3j.utils.Convert;
 import org.web3j.utils.Numeric;
 
+import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Base64;
@@ -162,8 +166,8 @@ public class ReceiveTransactionController
     @AllArgsConstructor
     private static class CompleteTransactionResponse
     {
-
         private final boolean success;
+        private final String reason;
     }
 
     /***
@@ -218,17 +222,20 @@ public class ReceiveTransactionController
             byte[] signedMessage = (byte[]) encode.invoke(null, rawTransaction, signature);
             String hexValue = "0x" + Hex.toHexString(signedMessage);
             System.out.println(hexValue);
-//            return new ResponseEntity(HttpStatus.OK);
             EthSendTransaction ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
 
             if (ethSendTransaction.hasError()) {
                 System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-
-                return new CompleteTransactionResponse(false);
+                return new CompleteTransactionResponse(false, ethSendTransaction.getError().getMessage());
             } else {
-                System.out.println(String.format("Sent Ether to %s, with tx_id = %s",
+                System.out.println(String.format("Sent Token to %s, with tx_id = %s",
                         Wallet.getPublicAddress(), hexValue));
-                return new CompleteTransactionResponse(true);
+
+                sendPendingTransaction(request.getTransactionDetails().getToAddress(),
+                        fromAddress, ethSendTransaction.getTransactionHash(), request.getTransactionDetails().getValue().toString(),
+                        request.getTransactionDetails().getType());
+
+                return new CompleteTransactionResponse(true, "");
             }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
@@ -306,5 +313,28 @@ public class ReceiveTransactionController
         byte[] newArray = Arrays.copyOfRange(data, 0, data.length);
         newArray[0] = 0x00;
         return new BigInteger(newArray);
+    }
+
+    private static void sendPendingTransaction(String to, String from, String hashId, String amount,
+                                               String type) {
+        HttpClient httpclient = HttpClients.createDefault();
+        HttpPost httppost = new HttpPost("https://crypterac-frontend.appspot.com/api/transactions/create");
+
+        try {
+            JSONObject params = new JSONObject();
+            params.put("to", to);
+            params.put("from", from);
+            params.put("amount", amount);
+            params.put("hashId", hashId);
+            params.put("type", type);
+            StringEntity requestEntity = new StringEntity(
+                    params.toString(),
+                    ContentType.APPLICATION_JSON);
+            httppost.setEntity(requestEntity);
+            //Execute and don't worry about the response.
+            httpclient.execute(httppost);
+        } catch (IOException | JSONException e) {
+            e.printStackTrace();
+        }
     }
 }

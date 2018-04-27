@@ -2,9 +2,14 @@ package com.crypterac.backend;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.HttpClients;
 import org.bouncycastle.util.encoders.Hex;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.springframework.web.bind.annotation.*;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.TypeReference;
@@ -24,6 +29,7 @@ import org.web3j.tx.Transfer;
 import org.web3j.utils.Convert;
 import org.web3j.utils.Numeric;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Base64;
@@ -78,11 +84,11 @@ public class SendTransactionController
 
             if (ethSendTransaction.hasError()) {
                 System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-                return new SendTransactionResponse(false);
+                return new SendTransactionResponse(false, ethSendTransaction.getError().getMessage());
             } else {
                 System.out.println(String.format("Approved %s, with tx_id = %s",
                         CRYPTERAC_CONTRACT, hexValue));
-                return new SendTransactionResponse(true);
+                return new SendTransactionResponse(true, "");
             }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
@@ -104,6 +110,7 @@ public class SendTransactionController
     {
 
         private final boolean success;
+        private final String reason;
     }
 
     /**
@@ -156,11 +163,16 @@ public class SendTransactionController
 
             if (ethSendTransaction.hasError()) {
                 System.out.println("Transaction Error: " + ethSendTransaction.getError().getMessage());
-                return new SendTransactionResponse(false);
+                return new SendTransactionResponse(false, ethSendTransaction.getError().getMessage());
             } else {
                 System.out.println(String.format("Sent Token to %s, with tx_id = %s",
                         toAddress, hexValue));
-                return new SendTransactionResponse(true);
+
+                String value = request.getType().equals(CRYPTERAC_TYPE) ? request.getAmount() : weiValue.toString();
+                sendPendingTransaction(toAddress,
+                        Wallet.getPublicAddress(), ethSendTransaction.getTransactionHash(), value,
+                        request.getType());
+                return new SendTransactionResponse(true, "");
             }
         } catch (Exception e) {
             throw new ErrorController.TransactionException(e.getMessage());
@@ -176,5 +188,28 @@ public class SendTransactionController
         byte[] newArray = Arrays.copyOfRange(data, 0, data.length);
         newArray[0] = 0x00;
         return new BigInteger(newArray);
+    }
+
+    private static void sendPendingTransaction(String to, String from, String hashId, String amount,
+                                               String type) {
+        HttpClient httpclient = HttpClients.createDefault();
+        HttpPost httppost = new HttpPost("https://crypterac-frontend.appspot.com/api/transactions/create");
+
+        try {
+            JSONObject params = new JSONObject();
+            params.put("to", to);
+            params.put("from", from);
+            params.put("amount", amount);
+            params.put("hashId", hashId);
+            params.put("type", type);
+            StringEntity requestEntity = new StringEntity(
+                    params.toString(),
+                    ContentType.APPLICATION_JSON);
+            httppost.setEntity(requestEntity);
+            //Execute and don't worry about the response.
+            httpclient.execute(httppost);
+        } catch (IOException | JSONException e) {
+            e.printStackTrace();
+        }
     }
 }
